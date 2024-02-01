@@ -22,6 +22,7 @@ from tslearn.metrics.soft_dtw_loss_pytorch import SoftDTWLossPyTorch
 from generate_ts import generate, generate_impure_signals,generate_pdw, generate_batches
 from deinterleave import deinterleave
 from torch.nn.functional import pairwise_distance
+from sklearn.cluster import SpectralClustering, KMeans
 
 class LSTM_Siamese(nn.Module):
     def __init__(self, n_features, embedding_dim=2, n_layers = 1):
@@ -64,6 +65,8 @@ def contrastive_loss(embedding1, embedding2, margin=1.0):
 loss_function = SoftDTWLossPyTorch(gamma = .1)
 n_windows = 100
 X, labels = generate_batches(n_windows, 700, p = [.5, .1, .3, .05, .05])
+
+'''
 X1, X2, sizes, X, labels, wid = deinterleave(X,labels, impurity = .4)
 #X,labels = generate_impure_signals(n_windows, ws = [300,350,400,450, 500,550,600,650, 700])
 n_windows = 5*n_windows
@@ -83,51 +86,50 @@ for x in X:
 X = transformed_X
 epochs = 200
 avg_losses = []
-
-model = LSTM_Siamese(4)
-optimizer = torch.optim.Adam(model.parameters(),
-                                 lr = 1e-4,
-                                 weight_decay = 1e-7)
-
-for epoch in range(epochs):
-    k=0
-    window = wid[0]
-    losses = []
-    if epoch%10 == 1:
-        print(avg_losses[-1])
-    for i in range(len(X)):
-        if i not in window:
-            k+=1
-            window = wid[k]
-        for j in window:
-            if j == i:  continue
-            seq_len1 = X[i].shape[0]
-            seq_len2 = X[j].shape[0]
-            
-            x1 = torch.tensor(np.array(X[i], dtype="float32"), dtype=torch.float32).reshape(1, seq_len1, 4)
-            x2 = torch.tensor(np.array(X[j], dtype="float32"), dtype=torch.float32).reshape(1, seq_len2, 4)
-            
-            emb1, emb2 = model(x1, x2)
-            loss = contrastive_loss(emb1, emb2)
-               
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            losses.append(loss.item())
-    avg_losses.append(np.mean(losses))
+'''
+def siam(X, wid, epochs = 50):
+    model = LSTM_Siamese(4)
+    optimizer = torch.optim.Adam(model.parameters(),
+                                     lr = 1e-4,
+                                     weight_decay = 1e-7)
     
-plt.plot(avg_losses)
-plt.show()
-X_encoded = []
-model.eval()
-for xt in X:
-    seq_len = xt.shape[0]
-    xt = torch.tensor(np.array(xt, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 4)
-    x_encoded = model.forward_one_val(xt).detach().numpy()
-    X_encoded.append(x_encoded[0])
-X_encoded = np.array(X_encoded)
+    for epoch in range(epochs):
+        k=0
+        window = wid[0]
+        losses = []
+        for i in range(len(X)):
+            if i not in window:
+                k+=1
+                window = wid[k]
+            for j in window:
+                if j == i:  continue
+                seq_len1 = X[i].shape[0]
+                seq_len2 = X[j].shape[0]
+                
+                x1 = torch.tensor(np.array(X[i], dtype="float32"), dtype=torch.float32).reshape(1, seq_len1, 4)
+                x2 = torch.tensor(np.array(X[j], dtype="float32"), dtype=torch.float32).reshape(1, seq_len2, 4)
+                
+                emb1, emb2 = model(x1, x2)
+                loss = contrastive_loss(emb1, emb2)
+                   
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                losses.append(loss.item())
+        
+    X_encoded = []
+    model.eval()
+    for xt in X:
+        seq_len = xt.shape[0]
+        xt = torch.tensor(np.array(xt, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 4)
+        x_encoded = model.forward_one_val(xt).detach().numpy()
+        X_encoded.append(x_encoded[0])
+        
+    X_encoded = np.array(X_encoded)
+    labels_pred = KMeans(n_clusters=5).fit_predict(X_encoded)
+    
+    return labels_pred
 
-from sklearn.cluster import SpectralClustering, KMeans
-labels_pred = KMeans(n_clusters=5).fit_predict(X_encoded)
-print(homogeneity_completeness_v_measure(labels, labels_pred))
-plt.scatter(X_encoded[:,0], X_encoded[:,1], c = labels)
+from evaluation_env import evaluate
+
+v = evaluate(X, labels, siam)
