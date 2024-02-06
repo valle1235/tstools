@@ -126,10 +126,9 @@ class LSTMAE(nn.Module):
         return x
 
 loss_function = SoftDTWLossPyTorch(gamma = .1)
-n_windows = 100
-#X, labels = generate_batches(n_windows, 700, p = [.5, .1, .3, .05, .05])
-#X1, X2, sizes, X, labels = deinterleave(X,labels, impurity = .4)
-X,labels = generate_impure_signals(n_windows, ws = [300,350,400,450, 500,550,600,650, 700])
+n_windows = 1000
+X, labels = generate_batches(n_windows, 700, p = [.5, .1, .3, .05, .05])
+X1, X2, sizes, X, labels,_ = deinterleave(X,labels, impurity = .4)
 n_windows = 5*n_windows
 
 X_complete = np.array([])
@@ -147,8 +146,8 @@ for x in X:
 X = transformed_X
 
 avg_losses = []
-epochs = 400
-model = LSTMAE(3, n_layers = 1)
+epochs = 50
+model = LSTMAE(4, n_layers = 1)
 optimizer = torch.optim.Adam(model.parameters(),
                                  lr = 1e-4,
                                  weight_decay = 1e-7)
@@ -158,7 +157,7 @@ for epoch in range(epochs):
         print(avg_losses[-1])
     for i,x in enumerate(X):
         seq_len = x.shape[0]
-        x = torch.tensor(np.array(x, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 3)
+        x = torch.tensor(np.array(x, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 4)
         #x_reshaped = x.reshape(-1, 4*largest_window)
         reconstructed = model(x, seq_len)
         
@@ -172,10 +171,34 @@ for epoch in range(epochs):
     
 plt.plot(avg_losses)
 X_encoded = []
+rf_means = np.array([0,.1,.2,.25,.5])
+amp_scalings = np.array([.1,.6,.9,.8,.2])
+amp_freq = np.array([1/15, 1/35, 1/55, 1/45, 1/25])
+aoa_start = np.array([50,49,48.5,47,46])
+aoa_coef = np.array([10**(-5.1),10**(-3.8),10**(-4.6),10**(-4.1),10**(-3.5)]),
+pw_start = np.array([1, .9, 1.4, 1.1, .8])
+X, labels = generate_batches(100, 700, p = [.5, .1, .3, .05, .05], rf_means=rf_means, amp_scalings=amp_scalings,
+                             amp_freq=amp_freq, aoa_start=aoa_start, aoa_coef=aoa_coef, pw_start=pw_start)
+X1, X2, sizes, X, labels,_ = deinterleave(X,labels, impurity = .4)
+
+X_complete = np.array([])
+for x in X:
+    if X_complete.shape[0] == 0:
+        X_complete = x
+        continue
+    X_complete = np.append(X_complete, x, axis = 0)
+X_complete = quantile_transform(X_complete, n_quantiles = 1000)
+transformed_X = []
+t = 0
+for x in X:
+    transformed_X.append(X_complete[t:t+x.shape[0]])
+    t+=x.shape[0]
+X = transformed_X
+
 model.eval()
 for xt in X:
     seq_len = xt.shape[0]
-    xt = torch.tensor(np.array(xt, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 3)
+    xt = torch.tensor(np.array(xt, dtype="float32"), dtype=torch.float32).reshape(1, seq_len, 4)
     x_encoded = model.encoder(xt).detach().numpy()
     X_encoded.append(x_encoded[0])
 X_encoded = np.array(X_encoded)
